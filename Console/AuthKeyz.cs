@@ -1202,6 +1202,38 @@ namespace AuthKeyz
 
             try
             {
+                string edSignature = headers["x-signature-ed25519"];
+                string timestamp = headers["x-signature-timestamp"];
+
+                if (!string.IsNullOrEmpty(edSignature) && !string.IsNullOrEmpty(timestamp))
+                {
+                    if (long.TryParse(timestamp, out long unixTimestamp))
+                    {
+                        DateTime timestampTime = DateTimeOffset.FromUnixTimeSeconds(unixTimestamp).UtcDateTime;
+                        DateTime currentTime = DateTime.UtcNow;
+                        TimeSpan timeDifference = currentTime - timestampTime;
+                        if (Math.Abs(timeDifference.TotalSeconds) > 300)
+                        {
+                            error("Date/Time settings aren't synced on your device, please sync them to use the program");
+                            TerminateProcess(GetCurrentProcess(), 1);
+                        }
+                    }
+
+                    var byteSig = encryption.str_to_byte_arr(edSignature);
+                    var byteKey = encryption.str_to_byte_arr("8e8d104f3ce9b29b411cfcf8e049d19fed42e63caa275e111bfa71ef3d237041");
+                    string body = timestamp + resp;
+                    var byteBody = Encoding.Default.GetBytes(body);
+
+                    bool signatureValid = Ed25519.CheckValid(byteSig, byteBody, byteKey);
+                    if (!signatureValid)
+                    {
+                        error("Signature checksum failed. Request was tampered with or session ended most likely. & echo: & echo Response: " + resp);
+                        Logger.LogEvent(resp + "\n");
+                        TerminateProcess(GetCurrentProcess(), 1);
+                    }
+                    return;
+                }
+
                 string serverSig = headers["signature"];
                 if (!string.IsNullOrEmpty(serverSig) && serverSig != "No encryption key supplied")
                 {
@@ -1215,8 +1247,7 @@ namespace AuthKeyz
                             if (serverSig.ToLower() != expectedSig)
                             {
                                 error("Signature checksum failed. Request was tampered with or session ended most likely. & echo: & echo Response: " + resp);
-                                Logger.LogEvent(resp + "
-");
+                                Logger.LogEvent(resp + "\n");
                                 TerminateProcess(GetCurrentProcess(), 1);
                             }
                         }
@@ -1225,6 +1256,9 @@ namespace AuthKeyz
             }
             catch
             {
+                error("Signature checksum failed. Request was tampered with or session ended most likely. & echo: & echo Response: " + resp);
+                Logger.LogEvent(resp + "\n");
+                TerminateProcess(GetCurrentProcess(), 1);
             }
         }
 
