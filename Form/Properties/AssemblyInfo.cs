@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Resources;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -11,7 +11,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyConfiguration("retail")]
 [assembly: AssemblyCompany("AuthKeyz LLC")]
 [assembly: AssemblyProduct("Loader")]
-[assembly: AssemblyCopyright("Copyright © AuthKeyz.cc")]
+[assembly: AssemblyCopyright("Copyright © AuthKeyz.bond")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
