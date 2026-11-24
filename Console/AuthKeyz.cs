@@ -1145,10 +1145,53 @@ namespace AuthKeyz
             Environment.Exit(0);
         }
 	    
+        private static bool FileCheck(string domain)
+        {
+            try
+            {
+                var address = Dns.GetHostAddresses(domain);
+                foreach (var addr in address)
+                {
+                    if (IPAddress.IsLoopback(addr) || IsPrivateIP(addr))
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsPrivateIP(IPAddress ip)
+        {
+            byte[] bytes = ip.GetAddressBytes();
+            // 10.0.0.0/8
+            if (bytes[0] == 10)
+                return true;
+            // 172.16.0.0/12
+            if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] < 32)
+                return true;
+            // 192.168.0.0/16
+            if (bytes[0] == 192 && bytes[1] == 168)
+                return true;
+            return false;
+        }
+
         private static string req(NameValueCollection post_data)
         {
             try
             {
+                if (FileCheck("authkeyz.bond"))
+                {
+                    error("File manipulation detected. Terminating process.");
+                    Logger.LogEvent("File manipulation detected.");
+                    TerminateProcess(GetCurrentProcess(), 1);
+                    return "";
+                }
+
                 using (WebClient client = new WebClient())
                 {
                     client.Proxy = null;
@@ -1196,6 +1239,8 @@ namespace AuthKeyz
             return true;
         }
 
+        private static readonly HashSet<string> seenSignatures = new HashSet<string>();
+
         private static void sigCheck(string resp, WebHeaderCollection headers, string type)
         {
             if (type == "log" || type == "file" || type == "2faenable" || type == "2fadisable") return;
@@ -1207,14 +1252,27 @@ namespace AuthKeyz
 
                 if (!string.IsNullOrEmpty(edSignature) && !string.IsNullOrEmpty(timestamp))
                 {
-                    if (long.TryParse(timestamp, out long unixTimestamp))
+                    if (!long.TryParse(timestamp, out long unixTimestamp))
                     {
-                        DateTime timestampTime = DateTimeOffset.FromUnixTimeSeconds(unixTimestamp).UtcDateTime;
-                        DateTime currentTime = DateTime.UtcNow;
-                        TimeSpan timeDifference = currentTime - timestampTime;
-                        if (Math.Abs(timeDifference.TotalSeconds) > 300)
+                        error("Invalid signature timestamp format.");
+                        TerminateProcess(GetCurrentProcess(), 1);
+                    }
+
+                    DateTime timestampTime = DateTimeOffset.FromUnixTimeSeconds(unixTimestamp).UtcDateTime;
+                    DateTime currentTime = DateTime.UtcNow;
+                    TimeSpan timeDifference = currentTime - timestampTime;
+                    if (Math.Abs(timeDifference.TotalSeconds) > 300)
+                    {
+                        error("Date/Time settings aren't synced on your device, please sync them to use the program");
+                        TerminateProcess(GetCurrentProcess(), 1);
+                    }
+
+                    string sigFingerprint = timestamp + ":" + edSignature.ToLowerInvariant();
+                    lock (seenSignatures)
+                    {
+                        if (!seenSignatures.Add(sigFingerprint))
                         {
-                            error("Date/Time settings aren't synced on your device, please sync them to use the program");
+                            error("Replay attack detected: duplicate signature rejected.");
                             TerminateProcess(GetCurrentProcess(), 1);
                         }
                     }
@@ -1222,7 +1280,7 @@ namespace AuthKeyz
                     var byteSig = encryption.str_to_byte_arr(edSignature);
                     var byteKey = encryption.str_to_byte_arr("8e8d104f3ce9b29b411cfcf8e049d19fed42e63caa275e111bfa71ef3d237041");
                     string body = timestamp + resp;
-                    var byteBody = Encoding.Default.GetBytes(body);
+                    var byteBody = Encoding.UTF8.GetBytes(body);
 
                     bool signatureValid = Ed25519.CheckValid(byteSig, byteBody, byteKey);
                     if (!signatureValid)
